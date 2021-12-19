@@ -1,0 +1,12 @@
+{
+	"./example.json": {
+		"desc": "The specification this pdf was generated with",
+		"rel": "Data"
+	},
+	"./README.md": {
+		"rel": "Supplement"
+	},
+	"example.pdf": {
+		"desc": "The Original PDF",
+	}
+}

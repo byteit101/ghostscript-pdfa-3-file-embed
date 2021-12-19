@@ -1,0 +1,427 @@
+%!
+
+% from https://comp.lang.postscript.narkive.com/CtRplAtR/json-reader-writer-in-postscript
+
+% JSON implementation in PostScript
+% (public domain)
+
+currentpacking true setpacking
+/JSON.utf8 true def
+/.JSON.file null def
+/.JSON.str 65535 string def
+/.JSON.hex (16#????) def
+/.JSON.backchar 0 def
+/.JSON.char 0 def
+
+/.JSON.namech 256 string def
+48 1 57 {.JSON.namech exch 1 put} for %0-9
+97 1 122 {.JSON.namech exch 1 put} for %a-z
+(+-.E) {.JSON.namech exch 1 put} forall
+
+/.JSON.escape 256 string def
+0 1 255 {.JSON.escape exch dup put} for
+.JSON.escape 98 8 put
+.JSON.escape 102 12 put
+.JSON.escape 110 10 put
+.JSON.escape 114 13 put
+.JSON.escape 116 9 put
+.JSON.escape 117 0 put
+
+/.JSON.readnum {
+	.JSON.str 0 .JSON.char put 1 {
+		.JSON.file read {
+			.JSON.namech 1 index get 0 eq {
+				/.JSON.backchar exch store .JSON.str exch 0 exch getinterval cvr
+				exit
+			} {
+				.JSON.str exch 2 index exch put 1 add
+			} ifelse
+		} {
+			JSON.badinput
+		} ifelse
+	} loop
+} bind def
+
+/.JSON.readword {
+	{
+		.JSON.file read {
+			.JSON.namech 1 index get 0 eq {
+				/.JSON.backchar exch store exit
+			} {
+				pop
+			} ifelse
+		} {
+			JSON.badinput
+		} ifelse
+	} loop
+} bind def
+
+/.JSON.readstring {
+	0 {
+		.JSON.file read pop dup 34 eq {
+		% End of string
+			pop dup string dup 2 index .JSON.str exch 0 exch getinterval 0 exch
+			putinterval exch pop exit
+		} {
+		% Character
+			.JSON.str 2 index 2 index put 92 eq {
+				.JSON.str 1 index .JSON.escape .JSON.file read pop get put
+				.JSON.str 1 index get 0 eq {
+					.JSON.file .JSON.hex 3 4 getinterval readstring pop pop
+					/.JSON.char .JSON.hex cvi store .JSON.char 127 gt JSON.utf8 and {
+						.JSON.char 16#0800 lt {
+						% Two byte UTF-8
+							.JSON.str 1 index .JSON.char -6 bitshift 16#C0 or put 1 add
+							.JSON.str 1 index .JSON.char 16#3F and 16#80 or put
+						} {
+						% Three byte UTF-8
+							.JSON.str 1 index .JSON.char -12 bitshift 16#E0 or put 1 add
+							.JSON.str 1 index .JSON.char -6 bitshift 16#3F and 16#80 or put
+							1 add .JSON.str 1 index .JSON.char 16#3F and 16#80 or put
+						} ifelse
+					} {
+						.JSON.str 1 index .JSON.char 255 and put
+					} ifelse
+				} if
+			} if 1 add
+		} ifelse
+	} loop
+} bind def
+
+/.JSON.parsech 256 array def
+33 1 255 {.JSON.parsech exch /JSON.badinput cvx put} for
+0 1 32 {.JSON.parsech exch null cvx put} for %spaces
+.JSON.parsech 34 /.JSON.readstring load put %"
+.JSON.parsech 43 /.JSON.readnum load put %+
+.JSON.parsech 44 null cvx put %,
+.JSON.parsech 45 /.JSON.readnum load put %-
+48 1 57 {.JSON.parsech exch /.JSON.readnum load put} for %numbers
+.JSON.parsech 58 /cvn load put %:
+.JSON.parsech 91 mark put %[
+.JSON.parsech 93 (]) cvn load put %]
+.JSON.parsech 102 {false .JSON.readword} put %f
+.JSON.parsech 110 {null .JSON.readword} put %n
+.JSON.parsech 116 {true .JSON.readword} put %t
+.JSON.parsech 123 mark put %{
+.JSON.parsech 125 (>>) cvn load put %}
+
+/.JSON.parse { % ( -- object )
+	.JSON.backchar 0 eq {
+		.JSON.file read
+	} {
+		.JSON.backchar /.JSON.backchar 0 store true
+	} ifelse {
+		/.JSON.char exch store .JSON.parsech .JSON.char get exec .JSON.parse
+	} if
+} bind def
+
+/.JSON.charx [32 {
+	true
+} repeat 224 {
+	false
+} repeat] def
+.JSON.charx 34 true put .JSON.charx 92 true put
+/.JSON.writechar {
+	.JSON.charx 1 index get {
+		.JSON.file (\\u00) writestring dup 16 lt {
+			.JSON.file 48 write
+		} if 16 .JSON.str cvrs .JSON.file exch writestring
+	} {
+		.JSON.file exch write
+	} ifelse
+} def
+
+%/.JSON.writedict <<
+%	/arraytype {
+%		.JSON.file 91 write false exch {
+%			exch {
+%				.JSON.file 44 write
+%			} if .JSON.write true
+%		} forall pop .JSON.file 93 write
+%	} /booleantype {
+%		.JSON.str cvs .JSON.file exch writestring
+%	} /dicttype {
+%		.JSON.file 123 write false exch {
+%			3 -1 roll {
+%				.JSON.file 44 write
+%			} if exch .JSON.write .JSON.file 58 write .JSON.write true
+%		} forall pop .JSON.file 125 write
+%	} /integertype {
+%		.JSON.str cvs .JSON.file exch writestring
+%	} /nametype {
+%		.JSON.str cvs .JSON.write
+%	} /nulltype {
+%		.JSON.file (null) writestring
+%	} /realtype {
+%		.JSON.str cvs .JSON.file exch writestring
+%	} /stringtype {
+%		.JSON.file 34 write {
+%			.JSON.writechar
+%		} forall .JSON.file 34 write
+%	}
+%>> def
+
+/JSON.read {/.JSON.file exch store .JSON.parse} bind def
+%/.JSON.write {dup type .JSON.writedict exch get exec} bind def
+%/JSON.write {exch /.JSON.file exch store .JSON.write .JSON.file 10 write} bind def
+
+setpacking
+
+% End of JSON parser
+
+% Concat strings  https://stackoverflow.com/a/12379557
+ /concatstrings % (a) (b) -> (ab)  
+   { exch dup length    
+     2 index length add string    
+     dup dup 4 2 roll copy length
+     4 -1 roll putinterval
+   } bind def 
+
+% Our code
+% JSON extractor
+
+% default attachment type
+/defaultAttachment /DefaultRel where { pop DefaultRel } { /Unspecified } ifelse def
+
+/attachmentNorm {
+	/inputobj exch def
+	 <<
+		/stringtype {
+			/single << 
+				/File inputobj
+				/Desc null
+				/Type defaultAttachment
+				>> def
+			 [ single ]
+		}
+		/arraytype {
+			[
+				inputobj {
+					<< exch
+					/File exch
+					/Desc null
+					/Type defaultAttachment
+					>>
+				} forall
+			]
+		}
+		/dicttype {
+			[
+				inputobj {
+					/kd exch def % the dictionary that is the values
+					/name exch def
+					<<
+						/File name 4096 string cvs
+						% Extract the desc and rel keys, if present, with defaults
+						/Desc kd /desc known { kd /desc get} { null} ifelse
+						/Type kd /rel known { kd /rel get cvn} { defaultAttachment } ifelse
+					>>
+				} forall
+			]
+		}
+	>> inputobj type get exec
+} def
+
+/basenameSubstr {
+	/str exch def
+	str (/) search {
+		pop % pre
+		pop % match
+		basenameSubstr % recurse
+	} {
+		% return string
+	} ifelse
+} def
+
+/expandDetails {
+	[ exch
+	 { 
+		/attachSpec exch def
+		% add basename
+		attachSpec /Basename attachSpec /File get basenameSubstr put
+		
+		% parsed date
+		/named (%pipe%date -r ") attachSpec /File get (" +"%Y%m%d%H%M%S%:z'" | tr ':' "'") concatstrings concatstrings 
+		(r) file def
+		attachSpec /Date named 40 string readline not {
+				pop
+			(Couldn't open file: ) attachSpec /File get concatstrings print
+			/invalidfileaccess signalerror
+			
+			} if put
+		named closefile
+		
+				
+		% parsed size
+		/thefile attachSpec /File get (r) file def
+		attachSpec /Size thefile bytesavailable put
+		thefile closefile
+		
+		% md5 and mime
+		/namedhash (%pipe%openssl md5 -binary ") attachSpec /File get (") concatstrings concatstrings  (r) file def
+		attachSpec /MD5 namedhash 16 string readstring pop put
+		namedhash closefile
+		
+		/namedmime (%pipe%xdg-mime query filetype ") attachSpec /File get (") concatstrings concatstrings  (r) file def
+		attachSpec /MIME namedmime 100 string readline pop put
+		namedmime closefile
+		
+		attachSpec
+	} forall
+	
+	]
+} def
+
+/debugAttachments {
+	 { 
+		/attachSpec exch def
+		(Entry: ) print
+		attachSpec /File get print
+		(\n\t Desc:\t) print
+		attachSpec /Desc get ==
+		(\t Size:\t) print
+		attachSpec /Size get =string cvs print
+		(\n\t Date:\t) print
+		attachSpec /Date get ==
+		(\t MD5:\t) print
+		attachSpec /MD5 get ==
+		(\t Mime:\t) print
+		attachSpec /MIME get print
+		(\n\t Short:\t) print
+		attachSpec /Basename get print
+		(\n\t Type:\t) print
+		attachSpec /Type get ==
+		(\n\n) print 
+	} forall
+} def
+
+% For testing
+%/jfile (test.json) (r) file def
+%jfile JSON.read attachmentNorm expandDetails debugAttachments
+%jfile closefile
+%(hi) print
+
+% pdfmark function
+/insertAttachment {
+	/attachSpec exch def
+	/MyFileName attachSpec /Basename get def
+	
+	mark /NamespacePush  pdfmark
+	
+	% Define the embedded file objects
+	mark /_objdef {myfileinfo} /type /dict /OBJ pdfmark
+	mark /_objdef {fstream} /type /stream  /OBJ pdfmark
+	
+	% Load the file to embed
+	mark {fstream} attachSpec /File get (r) file  /PUT pdfmark
+	
+	% assign the stream information
+	mark {fstream} <<
+	    /Type /EmbeddedFile
+	    /Subtype attachSpec /MIME get cvn
+	    /Params << 
+	      /Size 		attachSpec /Size get
+	      /CreationDate	attachSpec /Date get
+	      /ModDate 		attachSpec /Date get
+	      /CheckSum		attachSpec /MD5 get
+	    >>
+	  >> /PUT pdfmark
+	
+	% assign the file information
+	mark {myfileinfo} <<
+	    /Type /Filespec
+	    % Optionally add description
+	    	attachSpec /Desc get dup null eq {
+	    		pop
+	    	} {
+	    		/Desc exch
+	    	}ifelse
+	    % end description
+	    /F MyFileName
+	    /UF MyFileName
+	    /AFRelationship attachSpec /Type get
+	    /EF <<
+	      /F {fstream}
+	    >>
+	  >> /PUT pdfmark
+	    
+	% Embed the stream
+	mark /Name MyFileName /FS {myfileinfo} /EMBED pdfmark
+	mark {fstream} /CLOSE pdfmark
+	
+	% Updated last line from the original PDFA_defs.ps
+	mark {Catalog} << /AF [{myfileinfo}] >> /PUT pdfmark
+	mark /NamespacePop  pdfmark
+	
+} def
+
+% End of main attachment library
+
+% Start PDFA generation
+
+% This is a modified version of the Ghostscript 9.27 PDFA_def.ps file with 
+% that creates a PDF/A-3 file with an embedded attachment
+
+% Define entries in the document Info dictionary :
+/ICCProfile (/usr/share/color/argyll/ref/sRGB.icm) % Customize
+def
+
+% set the title, if set
+/DefaultTitle where {
+	pop
+	mark /Title DefaultTitle  /DOCINFO pdfmark
+} if
+
+
+% Define an ICC profile :
+
+[/_objdef {icc_PDFA} /type /stream /OBJ pdfmark
+[{icc_PDFA}
+<<
+  /N currentpagedevice /ProcessColorModel known {
+    currentpagedevice /ProcessColorModel get dup /DeviceGray eq
+    {pop 1} {
+      /DeviceRGB eq
+      {3}{4} ifelse
+    } ifelse
+  } {
+    (ERROR, unable to determine ProcessColorModel) == flush
+  } ifelse
+>> /PUT pdfmark
+[{icc_PDFA} ICCProfile (r) file /PUT pdfmark
+
+% Define the output intent dictionary :
+
+[/_objdef {OutputIntent_PDFA} /type /dict /OBJ pdfmark
+[{OutputIntent_PDFA} <<
+  /Type /OutputIntent             % Must be so (the standard requires).
+  /S /GTS_PDFA1                   % Must be so (the standard requires).
+  /DestOutputProfile {icc_PDFA}            % Must be so (see above).
+  /OutputConditionIdentifier (sRGB)      % Customize
+>> /PUT pdfmark
+[{Catalog} <</OutputIntents [ {OutputIntent_PDFA} ] >> /PUT pdfmark
+
+
+% New Attachment code starts here.
+
+
+% Load, parse json file, then insert content
+/jfile AttachmentSpec (r) file def
+jfile JSON.read attachmentNorm expandDetails { insertAttachment } forall
+jfile closefile
+
+% Choosing a rel/Type: (from PDF spec)
+% This entry is required to contain one of the values defined in PDF 2.0: Source, Data,
+% Alternative, Supplement, EncryptedPayload, FormData, Schema or Unspecified.
+% Custom values may be used where none of these entries is appropriate.
+
+% Usage:
+% gs -dPDFA=3 -sColorConversionStrategy=RGB -sDEVICE=pdfwrite 
+%-dPDFACompatibilityPolicy=1 
+%-sAttachmentSpec=myfile.json [-dDefaultRel=/Supplement ] [-sDefaultTitle="My Title" ]
+% -dNOPAUSE -dBATCH -dQUIET -o output-a3.pdf PDFA_def_attach.ps input.pdf
+
+% Optional: -dPDFSETTINGS=/default -dAutoRotatePages=/All
+
+
+
